@@ -29,6 +29,7 @@
 #include "mem_alloc.h"
 #include "keyboard.h"
 #include "low_battery.h"
+#include "screen_overlay.h"
 
 int CountNumChangedPixels(uint16_t *framebuffer, uint16_t *prevFramebuffer)
 {
@@ -104,6 +105,7 @@ int main()
   displayContentsLastChanged = tick();
   displayOff = false;
   InitLowBatterySystem();
+  InitScreenOverlay();
 
   // Track current SPI display controller write X and Y cursors.
   int spiX = -1;
@@ -162,6 +164,11 @@ int main()
       uint64_t waitStart = tick();
       while(__atomic_load_n(&numNewGpuFrames, __ATOMIC_SEQ_CST) == 0)
       {
+		if(PollOverlayUpdate()){ //Overlay was updated, send update.
+			__atomic_fetch_add(&numNewGpuFrames, 1, __ATOMIC_SEQ_CST);
+            OverlayUpdateReset();			
+		}
+		
 #if defined(BACKLIGHT_CONTROL) && defined(TURN_DISPLAY_OFF_AFTER_USECS_OF_INACTIVITY)
         if (!displayOff && tick() - waitStart > TURN_DISPLAY_OFF_AFTER_USECS_OF_INACTIVITY)
         {
@@ -178,7 +185,7 @@ int main()
         }
         else
 #endif
-          if (programRunning) syscall(SYS_futex, &numNewGpuFrames, FUTEX_WAIT, 0, 0, 0, 0); // Sleep until the next frame arrives
+          if (programRunning) usleep(10);//syscall(SYS_futex, &numNewGpuFrames, FUTEX_WAIT, 0, 0, 0, 0); // Sleep until the next frame arrives
       }
     }
 
@@ -261,7 +268,6 @@ int main()
     if (timeToSleep > 0)
       usleep(timeToSleep);
 #endif
-
       framebufferHasNewChangedPixels = SnapshotFramebuffer(framebuffer[0]);
 #else
       memcpy(framebuffer[0], videoCoreFramebuffer[1], gpuFramebufferSizeBytes);
@@ -278,6 +284,7 @@ int main()
 
       DrawStatisticsOverlay(framebuffer[0]);
       DrawLowBatteryIcon(framebuffer[0]);
+      DrawFullScreenImage(framebuffer[0]);
 
 #ifdef USE_GPU_VSYNC
 
@@ -298,6 +305,7 @@ int main()
         framebufferHasNewChangedPixels = SnapshotFramebuffer(framebuffer[0]);
         DrawStatisticsOverlay(framebuffer[0]);
         DrawLowBatteryIcon(framebuffer[0]);
+        DrawFullScreenImage(framebuffer[0]);
         framebufferHasNewChangedPixels = framebufferHasNewChangedPixels && IsNewFramebuffer(framebuffer[0], framebuffer[1]);
       }
 #else
